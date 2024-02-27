@@ -2,77 +2,144 @@ var express = require('express');
 var router = express.Router();
 const multer = require('multer');
 router.use(express.urlencoded({extended: true}))
+const mongoose = require('mongoose');
+const fs = require('fs'); // file system module for dealing with the images
 // Multer configuration
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-      cb(null, 'uploads/') // Destination folder for storing uploaded files
-  },
-  filename: function (req, file, cb) {
-      cb(null, file.originalname); // Keep the original filename
-  }
+const upload = multer({ dest: 'uploads/' });
+// MongoDB schema for recipes the image is not required
+  const recipesSchema = new mongoose.Schema({
+  instructions: { type: Array, required: true },
+  ingredients: { type: Array, required: true },
+  name: { type: String, required: true },
+  images: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Image' }],
+  categories: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Category' }]
 });
-const upload = multer({ storage: storage });
-// recipes array with some recipes to begin with
-const recipes = {
-  pizza: {
-    name: 'Pizza',
-    instructions: ['Step 1: Prepare the dough', 'Step 2: Add toppings', 'Step 3: Bake in oven'],
-    ingredients: ['Dough', 'Tomato Sauce', 'Cheese', 'Toppings']
-  },
-  pasta: {
-    name: 'Pasta',
-    instructions: ['Step 1: Boil water', 'Step 2: Cook pasta', 'Step 3: Add sauce'],
-    ingredients: ['Pasta', 'Tomato Sauce', 'Herbs']
-  }
-};
+// MongoDB schema for categories
+const categorySchema = new mongoose.Schema({
+  name: { type: String, required: true }
+});
+// MongoDB schema for images
+const imageSchema = new mongoose.Schema({
+  buffer: { type: Buffer, required: true },
+  mimetype: { type: String, required: true },
+  name: { type: String, required: true },
+  encoding: { type: String, required: true }
+});
+// create models
+const Recipe = mongoose.model('Recipe', recipesSchema);
+const Category = mongoose.model('Category', categorySchema);
+const Image = mongoose.model('Image', imageSchema);
+
+// Middleware to serve static files
+router.use(express.static('uploads/'));
+
 // Route to get the home page
 router.get('/', function(req, res, next) {
   res.render('index', { title: 'Recipes' });
 });
 // Route to get a recipe
-router.get('/recipe/:food', function(req, res) {
-  // Convert the food parameter to lowercase
-  const food = req.params.food.toLowerCase();
-  // Check if the food exists in the recipes array
-  if (recipes.hasOwnProperty(food)) { 
-      const recipe = recipes[food];
-      res.json({
-          name: recipe.name,
-          instructions: recipe.instructions,
-          ingredients: recipe.ingredients
-      });
-  } else {
-      // Return placeholder values if the food is not found
-      res.json({
-          name: 'Unknown',
-          instructions: ['Instructions not available'],
-          ingredients: ['Ingredients not available']
-      });
+router.get('/recipe/:food', async function(req, res) {
+  try {
+    const food = req.params.food;
+    const recipe = await Recipe.findOne({ name: food }).populate('images').populate('categories'); // Find recipe by name and populate images
+    if (recipe) {
+      res.json(recipe); // Return recipe if found
+    } else {
+      res.status(404).json({ message: 'Recipe not found' });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
-// Route to append new recipe to the array
-router.post('/recipe/', function(req, res) {
-  const newRecipe = req.body;
-  // case-insensitive comparison
-  const foodName = newRecipe.name.toLowerCase();
-  // Check if the recipe already exists
-  if (recipes.hasOwnProperty(foodName)) {
-      res.status(400).json({ error: 'Recipe already exists' });
-  } else {
-      // Add the new recipe to the recipes object
-      recipes[foodName] = {
-          name: newRecipe.name,
-          instructions: newRecipe.instructions,
-          ingredients: newRecipe.ingredients
-      };
-      // Return the added recipe
-      res.json(recipes[foodName]); 
+router.post('/recipe/', async function(req, res) {
+  try {
+      const newRecipe = req.body;
+      const existingRecipe = await Recipe.findOne({ name: newRecipe.name });
+      if (existingRecipe) {
+          return res.status(400).json({ error: 'Recipe already exists' });
+      }
+      // Find or create categories based on the checkbox values
+      const categoryIds = [];
+      if (newRecipe.categories.vegan) {
+          const veganCategory = await Category.findOne({ name: 'vegan' });
+          if (!veganCategory) {
+              const createdVeganCategory = await Category.create({ name: 'vegan' });
+              categoryIds.push(createdVeganCategory._id);
+          } else {
+              categoryIds.push(veganCategory._id);
+          }
+      }
+      if (newRecipe.categories.glutenFree) {
+          const glutenFreeCategory = await Category.findOne({ name: 'gluten-free' });
+          if (!glutenFreeCategory) {
+              const createdGlutenFreeCategory = await Category.create({ name: 'gluten-free' });
+              categoryIds.push(createdGlutenFreeCategory._id);
+          } else {
+              categoryIds.push(glutenFreeCategory._id);
+          }
+      }
+      if (newRecipe.categories.ovo) {
+          const ovoCategory = await Category.findOne({ name: 'ovo' });
+          if (!ovoCategory) {
+              const createdOvoCategory = await Category.create({ name: 'ovo' });
+              categoryIds.push(createdOvoCategory._id);
+          } else {
+              categoryIds.push(ovoCategory._id);
+          }
+      }
+      // Get the latest uploaded image
+      const latestImage = await Image.findOne().sort({ _id: -1 }).limit(1);
+
+      // Create new recipe with the associated image
+      const createdRecipe = await Recipe.create({
+        ...newRecipe,
+        images: latestImage._id, // Assuming images field in Recipe schema is ObjectId type
+        categories: categoryIds
+      });
+      console.log("image meni");
+      res.status(201).json(createdRecipe);
+  } catch (error) {
+      res.status(500).json({ error: error.message });
   }
 });
-// Route to handle image uploads but it doesn't do anything
-router.post('/images', upload.array('images', 2), function(req, res) {
-  // Array of uploaded files
-  const uploadedFiles = req.files;
-  res.json({ message: 'Hi' });
+// Route to handle image uploads
+router.post('/images', upload.array('images', 2), async function(req, res) {
+  try {
+    const files = req.files;
+    const uploadedImages = [];
+    // Iterate over each file in req.files array
+    for (const fileData of files) {
+      // Create an instance of imageSchema using fileData
+      const imageInstance = new Image({
+        buffer: fs.readFileSync(fileData.path),
+        mimetype: fileData.mimetype,
+        name: fileData.originalname,
+        encoding: fileData.encoding
+      });
+      // Save the image instance to the database
+      const savedImage = await imageInstance.save();
+      uploadedImages.push(savedImage);
+    }
+    console.log('Uploaded Images:', uploadedImages);
+    res.status(201).json(uploadedImages);
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+// Route to get an image by its ID
+router.get('/images/:imageId', async (req, res) => {
+  try {
+    const image = await Image.findById(req.params.imageId);
+    if (!image) {
+      return res.status(404).json({ message: 'Image not found' });
+    }
+    // Set necessary headers for sending image
+    res.set('Content-Type', image.mimetype);
+    res.set('Content-Disposition', 'inline');
+    res.send(image.buffer);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 module.exports = router;

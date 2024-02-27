@@ -13,6 +13,10 @@
     <nav>
         <div class="nav-wrapper" id="header">
             <a href="#" class="brand-logo">Recipe App</a>
+            <div id="search-bar-container">
+                <input type="search" id="search-bar">
+                <button id="search-btn">Search</button>
+            </div>
         </div>
     </nav>
     <div class="recipe-container">
@@ -22,6 +26,9 @@
             <ul id="recipe-ingredients" class="collection"></ul>
             <h4>Instructions</h4>
             <ol id="recipe-instructions" class="collection"></ol>
+            <h4>Categories</h4>
+            <ul id="recipe-categories" class="collection"></ul>
+            <div id="image-container"></div>
             <div class="col s12 m6">
                 <h1>Add Recipe</h1>
                 <form id="recipe-form">
@@ -33,6 +40,21 @@
                     <h4>Instructions</h4>
                     <textarea id="instructions-text"></textarea>
                     <button id="add-instruction" class="btn" type="button">Add instruction</button>
+                    <h4>Categories</h4>
+                    <div id="categories">
+                        <label>
+                            <input type="checkbox" class="filled-in" id="vegan-checkbox" />
+                            <span>Vegan</span>
+                        </label>
+                        <label>
+                            <input type="checkbox" class="filled-in" id="gluten-free-checkbox" />
+                            <span>Gluten-Free</span>
+                        </label>
+                        <label>
+                            <input type="checkbox" class="filled-in" id="ovo-checkbox" />
+                            <span>Ovo</span>
+                        </label>
+                    </div>
                     <label for="image-input">Select image(s):</label>
                     <input type="file" id="image-input" name="images" accept="image/*" multiple>
                     <button id="submit" class="btn" type="submit">Submit</button>
